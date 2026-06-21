@@ -1,0 +1,15 @@
+name = "creativewaco-webflow-airtable-sync"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[triggers]
+crons = ["0 * * * *"]
+
+[[kv_namespaces]]
+binding = "SYNC_STATE"
+id = "9b98d24af6da43a88226a63d65a1d1a2"
+preview_id = "a4bcedd7b5fa4a96b8c2ebbdec323cbb"
+
+[vars]
+WEBFLOW_SITE_ID = "68b3cf2c25982ab007b0152a"
+AIRTABLE_BASE_ID = "appux7Z1wivZRMNlr"
