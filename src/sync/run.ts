@@ -143,6 +143,18 @@ export async function runSync(
       results.push(stats);
       imagesOptimized += stats.imagesOptimized;
     }
+
+    if (options.full) {
+      for (const collection of targetCollections) {
+        await ensureCollectionTable(
+          config.airtableApiKey,
+          config.airtableBaseId,
+          schema,
+          collection,
+          collectionIdToTableId,
+        );
+      }
+    }
   }
 
   state.schemaFingerprint = fingerprintFromCollections(collections);
