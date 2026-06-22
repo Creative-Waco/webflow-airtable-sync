@@ -17,6 +17,9 @@ export interface SyncRunOptions {
   full?: boolean;
   schemaOnly?: boolean;
   collectionSlug?: string;
+  lightweightProbe?: boolean;
+  batchOffset?: number;
+  batchSize?: number;
 }
 
 export interface SyncRunResult {
@@ -28,6 +31,8 @@ export interface SyncRunResult {
   schemaChanges: import("./schema-drift").SchemaDriftChange[];
   imagesOptimized: number;
   collections: CollectionSyncStats[];
+  continued?: boolean;
+  batch?: { collectionSlug: string; nextOffset: number; total: number };
 }
 
 export async function runSync(
@@ -38,7 +43,11 @@ export async function runSync(
   const startedAt = new Date().toISOString();
   const state = await loadSyncState(kv);
 
-  const allCollections = await fetchAllCollections(config.webflowToken, config.webflowSiteId);
+  const allCollections = await fetchAllCollections(
+    config.webflowToken,
+    config.webflowSiteId,
+    options.collectionSlug,
+  );
   const collections = sortCollectionsForSync(allCollections);
 
   const probe = await probeChanges({
@@ -50,6 +59,7 @@ export async function runSync(
     full: Boolean(options.full),
     schemaOnly: Boolean(options.schemaOnly),
     targetSlug: options.collectionSlug,
+    lightweight: Boolean(options.lightweightProbe),
   });
 
   if (probe.skipped && !options.schemaOnly) {
@@ -81,9 +91,10 @@ export async function runSync(
     if (col) collectionIdToTableId.set(col.id, table.id);
   }
 
-  const assetFolderId = options.schemaOnly
-    ? ""
-    : await ensureAssetFolder(config.webflowToken, config.webflowSiteId);
+  const assetFolderId =
+    options.schemaOnly || options.full
+      ? ""
+      : await ensureAssetFolder(config.webflowToken, config.webflowSiteId);
 
   const targetCollections = options.collectionSlug
     ? collections.filter((c) => c.slug === options.collectionSlug)
@@ -135,6 +146,8 @@ export async function runSync(
           state,
           assetFolderId,
           full: Boolean(options.full),
+          batchOffset: options.batchOffset,
+          batchSize: options.batchSize ?? (options.full ? 25 : undefined),
         },
         collection,
         plan,
@@ -178,5 +191,7 @@ export async function runSync(
     schemaChanges: probe.schemaChanges,
     imagesOptimized,
     collections: results,
+    continued: results.some((r) => r.continued),
+    batch: results.find((r) => r.continued)?.batch,
   };
 }

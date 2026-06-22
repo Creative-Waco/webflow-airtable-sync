@@ -34,6 +34,8 @@ export interface ChangeProbeContext {
   full: boolean;
   schemaOnly: boolean;
   targetSlug?: string;
+  /** Cron mode: skip paginating all Webflow items (Airtable + schema only). */
+  lightweight?: boolean;
 }
 
 export async function probeChanges(ctx: ChangeProbeContext): Promise<ChangeProbeResult> {
@@ -54,7 +56,7 @@ export async function probeChanges(ctx: ChangeProbeContext): Promise<ChangeProbe
   if (ctx.full) {
     for (const col of targetCollections) {
       collections[col.slug] = {
-        airtableChanges: true,
+        airtableChanges: false,
         webflowChanges: true,
         changedWebflowIds: [],
         newWebflowIds: [],
@@ -66,8 +68,20 @@ export async function probeChanges(ctx: ChangeProbeContext): Promise<ChangeProbe
 
   for (const col of targetCollections) {
     const itemState = getCollectionState(ctx.state, col.slug);
-    const items = await listCollectionItems(ctx.webflowToken, col.id);
-    const webflow = detectWebflowItemChanges(items, itemState);
+    let webflow: ReturnType<typeof detectWebflowItemChanges>;
+
+    if (ctx.lightweight) {
+      const neverSynced = Object.keys(itemState.items).length === 0;
+      webflow = {
+        hasChanges: neverSynced,
+        changedIds: [],
+        newIds: neverSynced ? ["*"] : [],
+      };
+    } else {
+      const items = await listCollectionItems(ctx.webflowToken, col.id);
+      webflow = detectWebflowItemChanges(items, itemState);
+    }
+
     const airtableChanges = await detectAirtableChanges(
       ctx.airtableApiKey,
       ctx.airtableBaseId,

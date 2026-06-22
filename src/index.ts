@@ -16,6 +16,12 @@ function authorizeSync(request: Request, syncSecret: string): boolean {
   return token === syncSecret;
 }
 
+function parseOptionalInt(value: string | null): number | undefined {
+  if (value == null || value === "") return undefined;
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 async function handleHealth(env: Env): Promise<Response> {
   try {
     const config = requireEnv(env);
@@ -86,6 +92,8 @@ export default {
           full,
           schemaOnly,
           collectionSlug,
+          batchOffset: parseOptionalInt(url.searchParams.get("offset")),
+          batchSize: parseOptionalInt(url.searchParams.get("batch")) ?? (full ? 25 : undefined),
         });
         return json(result);
       } catch (error) {
@@ -101,6 +109,6 @@ export default {
 
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     const config = requireEnv(env);
-    ctx.waitUntil(runSync(config, env.SYNC_STATE));
+    ctx.waitUntil(runSync(config, env.SYNC_STATE, { lightweightProbe: true }));
   },
 };

@@ -53,6 +53,8 @@ export interface CollectionSyncStats {
   skipped: number;
   imagesOptimized: number;
   errors: string[];
+  continued?: boolean;
+  batch?: { collectionSlug: string; nextOffset: number; total: number };
 }
 
 export interface CollectionSyncPlan {
@@ -212,6 +214,8 @@ export async function syncCollection(
     state: SyncStateStore;
     assetFolderId: string;
     full: boolean;
+    batchOffset?: number;
+    batchSize?: number;
   },
   collection: WebflowCollection,
   plan: CollectionSyncPlan,
@@ -258,18 +262,14 @@ export async function syncCollection(
     const webflowById = new Map(webflowItems.map((i) => [i.id, i]));
 
     const airtableRecords = await listRecords(ctx.airtableApiKey, ctx.airtableBaseId, table.name, {
-      fields: [
-        FIELD_WEBFLOW_ITEM_ID,
-        FIELD_WEBFLOW_CMS_STATUS,
-        ...mappings.flatMap((m) => [m.airtableName, m.sourceUrlField, m.urlsJsonField].filter(Boolean) as string[]),
-      ],
+      fields: [FIELD_WEBFLOW_ITEM_ID],
     });
     const byWebflowId = recordByWebflowId(airtableRecords);
     const webflowIdByRecordId = buildWebflowIdMap(airtableRecords);
 
     const pushedRecordIds = new Set<string>();
 
-    if (plan.airtableChanges || ctx.full) {
+    if (plan.airtableChanges && !ctx.full) {
       const cursor = itemState.airtableCursor;
       const formula = ctx.full
         ? `{${FIELD_WEBFLOW_ITEM_ID}} != ''`
@@ -375,9 +375,25 @@ export async function syncCollection(
     }
 
     if (plan.webflowChanges || ctx.full) {
-      const targetIds = ctx.full
+      let targetIds = ctx.full
         ? webflowItems.map((i) => i.id)
         : [...plan.changedWebflowIds, ...plan.newWebflowIds];
+
+      const batchSize = ctx.full && ctx.batchSize ? ctx.batchSize : targetIds.length;
+      const batchOffset = ctx.full && ctx.batchOffset != null ? ctx.batchOffset : 0;
+      const total = targetIds.length;
+
+      if (ctx.full && batchSize < total) {
+        targetIds = targetIds.slice(batchOffset, batchOffset + batchSize);
+        if (batchOffset + batchSize < total) {
+          stats.continued = true;
+          stats.batch = {
+            collectionSlug: collection.slug,
+            nextOffset: batchOffset + batchSize,
+            total,
+          };
+        }
+      }
 
       const creates: Record<string, unknown>[] = [];
       const updates: Array<{ id: string; fields: Record<string, unknown> }> = [];
@@ -416,9 +432,12 @@ export async function syncCollection(
 
       if (creates.length) await createRecordsBatch(ctx.airtableApiKey, ctx.airtableBaseId, table.name, creates);
       if (updates.length) await updateRecordsBatch(ctx.airtableApiKey, ctx.airtableBaseId, table.name, updates);
-    }
 
-    updateItemTimestamps(itemState, webflowItems);
+      const processedItems = targetIds
+        .map((id) => webflowById.get(id))
+        .filter((item): item is WebflowItem => Boolean(item));
+      updateItemTimestamps(itemState, processedItems);
+    }
     ctx.state.collections[collection.slug] = itemState;
   } catch (err) {
     stats.errors.push(err instanceof Error ? err.message : String(err));
@@ -431,12 +450,29 @@ export async function ensureAssetFolder(webflowToken: string, siteId: string): P
   return getOrCreateAssetFolder(webflowToken, siteId);
 }
 
-export async function fetchAllCollections(webflowToken: string, siteId: string): Promise<WebflowCollection[]> {
+export async function fetchAllCollections(
+  webflowToken: string,
+  siteId: string,
+  targetSlug?: string,
+): Promise<WebflowCollection[]> {
   const { listCollections } = await import("../webflow/client");
   const summaries = await listCollections(webflowToken, siteId);
+
+  if (!targetSlug) {
+    const collections: WebflowCollection[] = [];
+    for (const summary of summaries) {
+      collections.push(await getCollection(webflowToken, summary.id));
+    }
+    return collections;
+  }
+
   const collections: WebflowCollection[] = [];
   for (const summary of summaries) {
-    collections.push(await getCollection(webflowToken, summary.id));
+    if (summary.slug === targetSlug) {
+      collections.push(await getCollection(webflowToken, summary.id));
+    } else {
+      collections.push({ ...summary, fields: [] });
+    }
   }
   return collections;
 }

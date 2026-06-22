@@ -97,11 +97,20 @@ KV namespace `WEBFLOW_AIRTABLE_SYNC_STATE` is configured in [`wrangler.toml`](wr
 
 ## Initial seed
 
-After deploy and PAT setup:
+After deploy and PAT setup, sync **one collection at a time** (avoids Cloudflare subrequest limits):
 
 ```bash
-curl -X POST "https://creativewaco-webflow-airtable-sync.josh-837.workers.dev/sync?full=1" \
-  -H "Authorization: Bearer $SYNC_SECRET"
+for slug in categories tags collections donors creative-opportunities sculptures team blog jobs projects benefits sponsor-packages shop artists event; do
+  curl -X POST "https://creativewaco-webflow-airtable-sync.josh-837.workers.dev/sync?full=1&collection=${slug}" \
+    -H "Authorization: Bearer $SYNC_SECRET"
+  sleep 5
+done
+```
+
+`?full=1` seeds **Webflow → Airtable only** (no push back to Webflow). After all tables exist, run schema repair for reference links:
+
+```bash
+curl -X POST ".../sync?schema=1" -H "Authorization: Bearer $SYNC_SECRET"
 ```
 
 ## Transition notes
